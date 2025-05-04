@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OTR Incident Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+        }
+        header {
+            background-color: #343a40;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            font-size: 24px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-areas: 
+                "incidents tasks"
+                "helpers map";
+            grid-template-columns: 58% 40%;
+            grid-template-rows: auto 400px;
+            gap: 20px;
+            padding: 20px 40px 20px 60px;
+            height: calc(100vh - 70px);
+        }
+        .section {
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow-y: auto;
+        }
+        #incident-container { grid-area: incidents; max-height: 400px; }
+        #pending-tasks { grid-area: tasks; max-height: 400px; }
+        #approved-helpers-section { grid-area: helpers; max-height: 350px; }
+        #map-section { grid-area: map; }
+
+        h2 {
+            margin-top: 0;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 5px;
+        }
+
+        .tile {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #e9f5ff;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .tile:hover {
+            background-color: #d0ebff;
+        }
+
+        #add-incident-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            font-size: 30px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background-color: #3c79b9a6;
+            color: white;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+
+        .modal, .details-modal {
+            display: none;
+            position: fixed;
+            top: 10%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #ccc;
+            box-shadow: 0 6px 10px rgba(0,0,0,0.3);
+            z-index: 100;
+            max-width: 500px;
+            max-height: 90%;
+            overflow-y: auto;
+        }
+        .modal button, .details-modal button {
+            margin-top: 10px;
+        }
+        .close-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            float: right;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        #incident-search {
+            width: 95%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        #approved-helpers {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #approved-helpers th {
+            background-color: #5490b8ad;
+            color: white;
+            padding: 8px;
+        }
+        #approved-helpers td {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+        #approved-helpers tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        #map { width: 100%; height: 350px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+<header>OTR Incident Dashboard</header>
+
+<div class="dashboard">
+    <div id="incident-container" class="section">
+        <h2>Incidents</h2>
+        <input type="text" id="incident-search" placeholder="Search by DSP, Date, Incident Type, or Post Code" oninput="filterIncidents()">
+        <div id="incident-list"></div>
+    </div>
+    <div id="pending-tasks" class="section">
+        <h2>Pending Tasks</h2>
+    </div>
+    <div id="approved-helpers-section" class="section">
+        <h2>Approved Helpers</h2>
+        <table id="approved-helpers">
+            <tr><th>DSP</th><th>Helper SIM</th><th>Expiry Date</th><th>Countdown</th></tr>
+        </table>
+    </div>
+    <div id="map-section" class="section">
+        <h2>Map</h2>
+        <div id="map"></div>
+    </div>
+</div>
+
+<div id="incident-form" class="modal">
+    <form id="new-incident-form">
+        <button type="button" class="close-btn" onclick="closeForm()">X</button><br>
+        <input type="date" name="date" required><br>
+        <input type="text" name="login" placeholder="Login" required><br>
+        <input type="text" name="dsp" placeholder="DSP" required><br>
+        <input type="text" name="transporterID" placeholder="Transporter ID" required><br>
+        <input type="text" name="postCode" placeholder="Post Code" required><br>
+        <input type="text" name="gsocTT" placeholder="GSOC TT" required><br>
+        <input type="text" name="emtID" placeholder="EMT ID" required><br>
+        <input type="text" name="crimeRef" placeholder="Crime Reference" required><br>
+        <input type="text" name="austinLink" placeholder="Austin Link" required><br>
+        <input type="text" name="stolenParcelSIM" placeholder="Stolen Parcel SIM" required><br>
+        <input type="text" name="spvr" placeholder="SPVR"><br>
+        <input type="text" name="incidentType" placeholder="Incident Type" required><br>
+        <input type="text" name="helperSIM" placeholder="Helper SIM"><br>
+        <input type="text" name="coordinates" placeholder="Latitude,Longitude" required><br>
+        <button type="submit">Add Incident</button>
+    </form>
+</div>
+
+<div id="details-modal" class="details-modal">
+    <button class="close-btn" onclick="closeDetails()">X</button>
+    <div id="details-content"></div>
+</div>
+
+<button id="add-incident-btn">+</button>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+    let incidents = JSON.parse(localStorage.getItem('incidents')) || [];
+    let approvedHelpers = JSON.parse(localStorage.getItem('approvedHelpers')) || [];
+    let pendingTasks = JSON.parse(localStorage.getItem('pendingTasks')) || [];
+
+    function saveData() {
+        localStorage.setItem('incidents', JSON.stringify(incidents));
+        localStorage.setItem('approvedHelpers', JSON.stringify(approvedHelpers));
+        localStorage.setItem('pendingTasks', JSON.stringify(pendingTasks));
+    }
+
+    document.getElementById('add-incident-btn').onclick = () => {
+        document.getElementById('incident-form').style.display = 'block';
+    };
+
+    function closeForm() {
+        document.getElementById('incident-form').style.display = 'none';
+    }
+
+    function closeDetails() {
+        document.getElementById('details-modal').style.display = 'none';
+    }
+
+    document.getElementById('new-incident-form').onsubmit = (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const incident = Object.fromEntries(formData.entries());
+        incidents.push(incident);
+
+        // If SPVR is attached, mark it later
+        if (incident.helperSIM && incident.helperSIM.trim() !== '') {
+            pendingTasks.push(incident);
+        }
+
+        saveData();
+        renderAll();
+        document.getElementById('incident-form').style.display = 'none';
+        e.target.reset();
+    };
+
+    function renderAll() {
+        renderIncidents();
+        renderApprovedHelpers();
+        renderPendingTasks();
+        renderMap();
+    }
+
+    function renderIncidents() {
+        const container = document.getElementById('incident-list');
+        container.innerHTML = '';
+        const now = new Date();
+
+        incidents.forEach((incident) => {
+            let alertIcon = '';
+            let spvrIcon = incident.spvr ? '📎' : '';
+
+            const postcodeMatch = incidents.find(prev => {
+                if (prev === incident) return false;
+                const dateDiff = (new Date(incident.date) - new Date(prev.date)) / (1000 * 60 * 60 * 24);
+                return prev.postCode.slice(0, 4) === incident.postCode.slice(0, 4) && dateDiff < 90;
+            });
+
+            if (postcodeMatch) {
+                alertIcon = `<a href="#" onclick="showDetails(postcodeMatch)">⚠</a>`;
+            }
+
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.innerHTML = `<strong>${incident.dsp} ${incident.date}</strong> ${spvrIcon} ${alertIcon}<br>${incident.incidentType}`;
+            tile.onclick = () => showDetails(incident);
+            container.appendChild(tile);
+        });
+    }
+
+    function renderPendingTasks() {
+        const container = document.getElementById('pending-tasks');
+        container.innerHTML = '<h2>Pending Tasks</h2>';
+
+        pendingTasks.forEach((incident, index) => {
+            const task = document.createElement('div');
+            task.className = 'tile';
+            task.innerHTML = `${incident.dsp} ${incident.date} Helper Request - Pending 
+            <br><button onclick="approveTask(${index})">Approve</button>
+            <button onclick="rejectTask(${index})">Reject</button>`;
+            container.appendChild(task);
+        });
+    }
+
+    function approveTask(index) {
+        const incident = pendingTasks[index];
+        const expiryDate = prompt('Enter expiry date (YYYY-MM-DD):');
+        if (!expiryDate) return;
+        approvedHelpers.push({ dsp: incident.dsp, helperSIM: incident.helperSIM, expiryDate });
+        pendingTasks.splice(index, 1);
+        saveData();
+        renderAll();
+    }
+
+    function rejectTask(index) {
+        pendingTasks.splice(index, 1);
+        saveData();
+        renderAll();
+    }
+
+    function renderApprovedHelpers() {
+        const table = document.getElementById('approved-helpers');
+        table.innerHTML = '<tr><th>DSP</th><th>Helper SIM</th><th>Expiry Date</th><th>Countdown</th></tr>';
+        approvedHelpers.forEach(helper => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${helper.dsp}</td>
+                <td>${helper.helperSIM}</td>
+                <td>${helper.expiryDate}</td>
+                <td>${calculateCountdown(helper.expiryDate)}</td>
+            `;
+            table.appendChild(row);
+        });
+    }
+
+    function calculateCountdown(expiry) {
+        const today = new Date();
+        const expiryDate = new Date(expiry);
+        const days = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+        return days > 0 ? `${days} days` : 'Expired';
+    }
+
+    function showDetails(incident) {
+        const content = `
+            <h3>Incident Details</h3>
+            <p><strong>Date:</strong> ${incident.date}</p>
+            <p><strong>Login:</strong> ${incident.login}</p>
+            <p><strong>DSP:</strong> ${incident.dsp}</p>
+            <p><strong>Transporter ID:</strong> ${incident.transporterID}</p>
+            <p><strong>Post Code:</strong> ${incident.postCode}</p>
+            <p><strong>GSOC TT:</strong> ${incident.gsocTT}</p>
+            <p><strong>EMT ID:</strong> ${incident.emtID}</p>
+            <p><strong>Crime Reference:</strong> ${incident.crimeRef}</p>
+            <p><strong>Austin Link:</strong> ${incident.austinLink}</p>
+            <p><strong>Stolen Parcel SIM:</strong> ${incident.stolenParcelSIM}</p>
+            <p><strong>SPVR:</strong> ${incident.spvr || 'None'}</p>
+            <p><strong>Incident Type:</strong> ${incident.incidentType}</p>
+            <p><strong>Helper SIM:</strong> ${incident.helperSIM}</p>
+            <p><strong>Coordinates:</strong> ${incident.coordinates}</p>
+        `;
+        document.getElementById('details-content').innerHTML = content;
+        document.getElementById('details-modal').style.display = 'block';
+    }
+
+    function filterIncidents() {
+        const query = document.getElementById('incident-search').value.toLowerCase();
+        const filtered = incidents.filter(incident =>
+            [incident.dsp, incident.date, incident.incidentType, incident.postCode]
+            .some(field => field.toLowerCase().includes(query))
+        );
+        document.getElementById('incident-list').innerHTML = '';
+        filtered.forEach(incident => {
+            let alertIcon = '';
+            let spvrIcon = incident.spvr ? '📎' : '';
+            const tile = document.createElement('div');
+            tile.className = 'tile';
+            tile.innerHTML = `<strong>${incident.dsp} ${incident.date}</strong> ${spvrIcon} ${alertIcon}<br>${incident.incidentType}`;
+            tile.onclick = () => showDetails(incident);
+            document.getElementById('incident-list').appendChild(tile);
+        });
+    }
+
+    let map = L.map('map').setView([51.505, -0.09], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    function renderMap() {
+        map.eachLayer(layer => {
+            if (layer instanceof L.Marker) map.removeLayer(layer);
+        });
+
+        incidents.forEach(incident => {
+            const [lat, lng] = incident.coordinates.split(',').map(Number);
+            if (!isNaN(lat) && !isNaN(lng)) {
+                L.marker([lat, lng]).addTo(map)
+                    .bindPopup(`${incident.dsp} ${incident.date}`);
+            }
+        });
+    }
+
+    renderAll();
+</script>
+
+</body>
+</html>
